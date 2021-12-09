@@ -1,4 +1,7 @@
-[org 0x7E00]
+[bits 16] ; Tell NASM that we are currently in 16 bit mode
+
+; Compile time macroes
+PageTableEntry equ 0x1000
 
 ; Print that we are loading the kernel
 mov ah, 0x0E
@@ -63,14 +66,14 @@ StartPM: ; Far jumped to start executing in 32 bit protected mode
 	jz NoLM
 
 	; Enable paging
-	mov edi, 0x1000
+	mov edi, PageTableEntry
 	mov cr3, edi
 	mov dword [edi], 0x2003
-	add edi, 1000
+	add edi, 0x1000
 	mov dword [edi], 0x3003
-	add edi, 1000
+	add edi, 0x1000
 	mov dword [edi], 0x4003
-	add edi, 1000
+	add edi, 0x1000
 	mov ebx, 0x00000003
 	mov ecx, 512
 	.SetEntry:
@@ -86,7 +89,7 @@ StartPM: ; Far jumped to start executing in 32 bit protected mode
 	or eax, 1 << 8
 	wrmsr
 	mov eax, cr0
-	or eax, 1 << 30
+	or eax, 1 << 31
 	mov cr0, eax
 
 	; Edit the GDT to support 64bit LM
@@ -108,15 +111,76 @@ NoLM:                   ; No long mode support
 
 ; The actuall function to start the C kernel
 [bits 64]
+[extern _start] ; Kernel start function
 StartKernelC:
 	; Clear the screen with blue
 	mov edi, 0xb8000
 	mov rax, 0x1f201f201f201f20
 	mov ecx, 500
 	rep stosq
-	mov [0xB8000], byte '0'
+
+	; Set cursor to 0, 0
+	mov dx, 0x3D4
+	mov al, 0x0F
+	out dx, al
+	mov dx, 0x3D5
+	mov al, 0
+	out dx, al
+
+	mov dx, 0x3D4
+	mov al, 0x0E
+	out dx, al
+	mov dx, 0x3D5
+	mov al, 0
+	out dx, al
+
+	; Switch to C
+	call _start
 
 	jmp $           ; Infinate loop
+
+; IDT
+[extern _idt]
+idtDescriptor:
+  dw 4095
+  dq _idt
+
+
+  %macro PUSHALL 0
+  	push rax
+  	push rcx
+  	push rdx
+  	push r8
+  	push r9
+  	push r10
+  	push r11
+  %endmacro
+
+  %macro POPALL 0
+  	pop r11
+  	pop r10
+  	pop r9
+  	pop r8
+  	pop rdx
+  	pop rcx
+  	pop rax
+
+  %endmacro
+
+[extern isr1_handler]
+
+isr1:
+  PUSHALL
+  call isr1_handler
+  POPALL
+  iretq
+  GLOBAL isr1
+
+LoadIDT:
+  lidt[idtDescriptor]
+  sti
+  ret
+  GLOBAL LoadIDT
 
 [bits 16]
 ; The GDT
@@ -154,5 +218,4 @@ EditGDT:
 	mov [GDT_CODEDESC + 6], byte 10101111b
 	mov [GDT_DATADESC + 6], byte 10101111b
 	ret
-
-times 2048-($-$$) db 0
+[bits 16]
